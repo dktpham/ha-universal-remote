@@ -1,0 +1,465 @@
+# Virtual Remote · 5-button dispatcher
+#
+# Layer 2 of two. This half only ever speaks the canonical vocabulary, so it has
+# no idea whether the remote behind it is ZHA, Zigbee2MQTT, Thread or a wall
+# switch. Pair it with the Adapter blueprint and give both the same remote ID.
+#
+# Slots are generic on purpose. b1..b5 stay meaningful across every device you
+# will ever map, where "up"/"down" stops being true the moment you map a cube or
+# a two-button remote. The labels below are only hints for the usual 5-button
+# layout - wire them however your hardware is shaped.
+#
+# Suggested layout for an IKEA TRADFRI 5-button / STYRBAR:
+#   b1  centre / power        b2  up / brighter      b3  down / dimmer
+#   b4  left                  b5  right
+
+blueprint:
+  name: Virtual Remote · 5-button dispatcher
+  description: >-
+    Maps canonical `virtual_remote` events from a 5-button remote to any actions
+    you like - single press, double press, hold and release for each of the five
+    buttons, with optional hold-to-repeat. Requires the Virtual Remote · Adapter
+    blueprint to be set up first with the same remote ID.
+  domain: automation
+  author: dktpham
+  input:
+    remote:
+      name: Virtual remote ID
+      description: >-
+        Must match the ID you gave the adapter automation exactly,
+        e.g. `living_room_5button`.
+      selector:
+        text:
+
+    b1:
+      name: Button 1 · centre / power
+      icon: mdi:power
+      collapsed: true
+      input:
+        b1_short:
+          name: Single press
+          default: []
+          selector:
+            action:
+        b1_double:
+          name: Double press
+          default: []
+          selector:
+            action:
+        b1_long:
+          name: Hold
+          description: Repeated while held if hold-to-repeat is enabled below.
+          default: []
+          selector:
+            action:
+        b1_release:
+          name: Release
+          description: Runs when the hold ends. Also stops a repeating hold.
+          default: []
+          selector:
+            action:
+
+    b2:
+      name: Button 2 · up / brighter
+      icon: mdi:arrow-up
+      collapsed: true
+      input:
+        b2_short:
+          name: Single press
+          default: []
+          selector:
+            action:
+        b2_double:
+          name: Double press
+          default: []
+          selector:
+            action:
+        b2_long:
+          name: Hold
+          default: []
+          selector:
+            action:
+        b2_release:
+          name: Release
+          default: []
+          selector:
+            action:
+
+    b3:
+      name: Button 3 · down / dimmer
+      icon: mdi:arrow-down
+      collapsed: true
+      input:
+        b3_short:
+          name: Single press
+          default: []
+          selector:
+            action:
+        b3_double:
+          name: Double press
+          default: []
+          selector:
+            action:
+        b3_long:
+          name: Hold
+          default: []
+          selector:
+            action:
+        b3_release:
+          name: Release
+          default: []
+          selector:
+            action:
+
+    b4:
+      name: Button 4 · left
+      icon: mdi:arrow-left
+      collapsed: true
+      input:
+        b4_short:
+          name: Single press
+          default: []
+          selector:
+            action:
+        b4_double:
+          name: Double press
+          default: []
+          selector:
+            action:
+        b4_long:
+          name: Hold
+          default: []
+          selector:
+            action:
+        b4_release:
+          name: Release
+          default: []
+          selector:
+            action:
+
+    b5:
+      name: Button 5 · right
+      icon: mdi:arrow-right
+      collapsed: true
+      input:
+        b5_short:
+          name: Single press
+          default: []
+          selector:
+            action:
+        b5_double:
+          name: Double press
+          default: []
+          selector:
+            action:
+        b5_long:
+          name: Hold
+          default: []
+          selector:
+            action:
+        b5_release:
+          name: Release
+          default: []
+          selector:
+            action:
+
+    hold:
+      name: Hold behaviour
+      icon: mdi:gesture-tap-hold
+      collapsed: true
+      input:
+        hold_repeat:
+          name: Repeat while held
+          description: >-
+            Run each Hold action over and over until the button is released,
+            instead of once. This is what makes hold-to-dim and hold-to-run-a-
+            cover feel right. Leave off if your Hold actions should fire once.
+          default: false
+          selector:
+            boolean:
+        hold_interval:
+          name: Repeat interval
+          description: Wait between repeats while a button is held.
+          default: 400
+          selector:
+            number:
+              min: 100
+              max: 3000
+              step: 50
+              unit_of_measurement: ms
+        hold_max_steps:
+          name: Maximum repeats
+          description: >-
+            Safety cap. The loop normally ends when the release event arrives;
+            this only stops it running forever if that event is never sent -
+            which is also the fallback for remotes with no release gesture.
+          default: 30
+          selector:
+            number:
+              min: 1
+              max: 200
+
+# restart is deliberate and load-bearing: a release event arriving as a fresh
+# run is what cancels a repeating hold loop. Any other press cancels it too,
+# which is what you want on a remote.
+mode: restart
+
+triggers:
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b1_short }
+    id: b1_short
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b1_double }
+    id: b1_double
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b1_long }
+    id: b1_long
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b1_release }
+    id: b1_release
+
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b2_short }
+    id: b2_short
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b2_double }
+    id: b2_double
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b2_long }
+    id: b2_long
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b2_release }
+    id: b2_release
+
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b3_short }
+    id: b3_short
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b3_double }
+    id: b3_double
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b3_long }
+    id: b3_long
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b3_release }
+    id: b3_release
+
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b4_short }
+    id: b4_short
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b4_double }
+    id: b4_double
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b4_long }
+    id: b4_long
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b4_release }
+    id: b4_release
+
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b5_short }
+    id: b5_short
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b5_double }
+    id: b5_double
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b5_long }
+    id: b5_long
+  - trigger: event
+    event_type: virtual_remote
+    event_data: { remote: !input remote, gesture: b5_release }
+    id: b5_release
+
+variables:
+  hold_repeat: !input hold_repeat
+  hold_interval: !input hold_interval
+  hold_max_steps: !input hold_max_steps
+  # Available to your actions - useful for dials, empty otherwise.
+  value: "{{ trigger.event.data.value | default('', true) }}"
+
+actions:
+  - choose:
+      # ---------- Button 1 ----------
+      - alias: Button 1 · single press
+        conditions:
+          - condition: trigger
+            id: b1_short
+        sequence: !input b1_short
+      - alias: Button 1 · double press
+        conditions:
+          - condition: trigger
+            id: b1_double
+        sequence: !input b1_double
+      - alias: Button 1 · hold
+        conditions:
+          - condition: trigger
+            id: b1_long
+        sequence:
+          - choose:
+              - conditions: "{{ hold_repeat }}"
+                sequence:
+                  - repeat:
+                      count: "{{ hold_max_steps | int }}"
+                      sequence:
+                        - sequence: !input b1_long
+                        - delay:
+                            milliseconds: "{{ hold_interval | int }}"
+            default:
+              - sequence: !input b1_long
+      - alias: Button 1 · release
+        conditions:
+          - condition: trigger
+            id: b1_release
+        sequence: !input b1_release
+
+      # ---------- Button 2 ----------
+      - alias: Button 2 · single press
+        conditions:
+          - condition: trigger
+            id: b2_short
+        sequence: !input b2_short
+      - alias: Button 2 · double press
+        conditions:
+          - condition: trigger
+            id: b2_double
+        sequence: !input b2_double
+      - alias: Button 2 · hold
+        conditions:
+          - condition: trigger
+            id: b2_long
+        sequence:
+          - choose:
+              - conditions: "{{ hold_repeat }}"
+                sequence:
+                  - repeat:
+                      count: "{{ hold_max_steps | int }}"
+                      sequence:
+                        - sequence: !input b2_long
+                        - delay:
+                            milliseconds: "{{ hold_interval | int }}"
+            default:
+              - sequence: !input b2_long
+      - alias: Button 2 · release
+        conditions:
+          - condition: trigger
+            id: b2_release
+        sequence: !input b2_release
+
+      # ---------- Button 3 ----------
+      - alias: Button 3 · single press
+        conditions:
+          - condition: trigger
+            id: b3_short
+        sequence: !input b3_short
+      - alias: Button 3 · double press
+        conditions:
+          - condition: trigger
+            id: b3_double
+        sequence: !input b3_double
+      - alias: Button 3 · hold
+        conditions:
+          - condition: trigger
+            id: b3_long
+        sequence:
+          - choose:
+              - conditions: "{{ hold_repeat }}"
+                sequence:
+                  - repeat:
+                      count: "{{ hold_max_steps | int }}"
+                      sequence:
+                        - sequence: !input b3_long
+                        - delay:
+                            milliseconds: "{{ hold_interval | int }}"
+            default:
+              - sequence: !input b3_long
+      - alias: Button 3 · release
+        conditions:
+          - condition: trigger
+            id: b3_release
+        sequence: !input b3_release
+
+      # ---------- Button 4 ----------
+      - alias: Button 4 · single press
+        conditions:
+          - condition: trigger
+            id: b4_short
+        sequence: !input b4_short
+      - alias: Button 4 · double press
+        conditions:
+          - condition: trigger
+            id: b4_double
+        sequence: !input b4_double
+      - alias: Button 4 · hold
+        conditions:
+          - condition: trigger
+            id: b4_long
+        sequence:
+          - choose:
+              - conditions: "{{ hold_repeat }}"
+                sequence:
+                  - repeat:
+                      count: "{{ hold_max_steps | int }}"
+                      sequence:
+                        - sequence: !input b4_long
+                        - delay:
+                            milliseconds: "{{ hold_interval | int }}"
+            default:
+              - sequence: !input b4_long
+      - alias: Button 4 · release
+        conditions:
+          - condition: trigger
+            id: b4_release
+        sequence: !input b4_release
+
+      # ---------- Button 5 ----------
+      - alias: Button 5 · single press
+        conditions:
+          - condition: trigger
+            id: b5_short
+        sequence: !input b5_short
+      - alias: Button 5 · double press
+        conditions:
+          - condition: trigger
+            id: b5_double
+        sequence: !input b5_double
+      - alias: Button 5 · hold
+        conditions:
+          - condition: trigger
+            id: b5_long
+        sequence:
+          - choose:
+              - conditions: "{{ hold_repeat }}"
+                sequence:
+                  - repeat:
+                      count: "{{ hold_max_steps | int }}"
+                      sequence:
+                        - sequence: !input b5_long
+                        - delay:
+                            milliseconds: "{{ hold_interval | int }}"
+            default:
+              - sequence: !input b5_long
+      - alias: Button 5 · release
+        conditions:
+          - condition: trigger
+            id: b5_release
+        sequence: !input b5_release

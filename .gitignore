@@ -1,0 +1,7 @@
+# Home Assistant backups contain access tokens, the auth store and secrets.yaml.
+# Never commit one.
+*.tar
+*.tar.gz
+ha_backup*
+secrets.yaml
+.storage/

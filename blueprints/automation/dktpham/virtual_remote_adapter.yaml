@@ -1,0 +1,87 @@
+# Virtual Remote · Adapter
+#
+# Layer 1 of two. This is the driver: it turns whatever your hardware emits into
+# a canonical vocabulary, and nothing downstream ever learns which integration
+# the remote came from.
+#
+# You add one trigger per button gesture and label each trigger with a canonical
+# gesture name. The label is the entire mapping - there are no per-model tables
+# in this file, which is why it works with ZHA, Zigbee2MQTT, deCONZ, Matter,
+# Thread, an ESPHome button, or an integration that does not exist yet.
+#
+# THE ONE RULE: every trigger MUST have a Trigger ID set, and that ID must be a
+# canonical gesture name. In the automation editor, use the three-dot menu on a
+# trigger -> "Edit ID". If you forget, Home Assistant falls back to the
+# trigger's position ("0", "1", ...) and the dispatcher will not match it.
+#
+# Canonical vocabulary
+#   buttons   b1 b2 b3 b4 b5 b6 b7 b8   (and dial)
+#   gestures  short  double  triple  long  release  cw  ccw
+#   composed  b1_short   b3_long   b3_release   dial_cw
+#
+# "long" fires when a hold begins, "release" when it ends. A remote that cannot
+# report a release simply has no *_release triggers, and hold-to-repeat in the
+# dispatcher is then capped by its step limit instead.
+
+blueprint:
+  name: Virtual Remote · Adapter (any button device → canonical events)
+  description: >-
+    Normalises any button device into canonical `virtual_remote` events, so the
+    dispatcher blueprints never need to know about ZHA, Zigbee2MQTT, deCONZ or
+    anything else. Add one trigger per gesture and set each trigger's ID to a
+    canonical name such as `b1_short`, `b2_long`, `b2_release` or `dial_cw`.
+    One adapter automation per physical remote.
+  domain: automation
+  author: dktpham
+  input:
+    remote_id:
+      name: Virtual remote ID
+      description: >-
+        A short unique slug identifying this remote, e.g. `living_room_5button`.
+        The dispatcher blueprint must be given exactly the same ID. Lower case,
+        no spaces.
+      selector:
+        text:
+
+    hardware_triggers:
+      name: Hardware button events
+      description: >-
+        One trigger per button gesture. Use whatever your integration offers -
+        a device trigger, a raw `zha_event`, an MQTT topic, a state change.
+        REQUIRED: set each trigger's ID (three-dot menu → Edit ID) to a
+        canonical gesture name such as `b1_short` or `b2_release`. The ID is the
+        mapping; the trigger itself can be as hardware-specific as you like.
+      selector:
+        trigger:
+
+    value_template:
+      name: Value passthrough (advanced, optional)
+      description: >-
+        Attaches a `value` to every emitted event - intended for dials, where
+        rotation magnitude or step size matters. Leave empty unless you need it.
+        This template runs on EVERY gesture, so it must never raise: guard it
+        with `default`, e.g.
+        `{{ trigger.event.data.args[0] | default(0) }}`.
+      default: ""
+      selector:
+        text:
+
+# parallel so a burst of presses is never dropped; the dispatcher decides what
+# to do about overlap, not the adapter.
+mode: parallel
+max: 25
+max_exceeded: silent
+
+# Spliced in verbatim. Assigned at the top level rather than wrapped in a
+# `- triggers:` item, because the flattener in Home Assistant only unwraps a
+# wrapper dict that contains the `triggers` key and nothing else.
+triggers: !input hardware_triggers
+
+actions:
+  - alias: Emit the canonical event
+    event: virtual_remote
+    event_data:
+      remote: !input remote_id
+      # The whole mapping, in one line: the trigger's ID *is* the gesture.
+      gesture: "{{ trigger.id }}"
+      value: !input value_template
