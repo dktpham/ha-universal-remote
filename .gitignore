@@ -5,3 +5,10 @@
 ha_backup*
 secrets.yaml
 .storage/
+
+# Local development
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.claude/settings.local.json

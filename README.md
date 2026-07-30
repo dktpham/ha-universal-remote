@@ -1,191 +1,205 @@
-# Universal HA Remote Blueprints
+# Virtual Remote
 
-Map any button device to any action, without the blueprint knowing or caring
-which integration the device came from.
+Turn any button device into a standard Home Assistant remote — regardless of
+whether it arrived via ZHA, Zigbee2MQTT, deCONZ, Thread or anything else — and
+get gestures the hardware never reported, like double press.
 
-## The idea
+> **Status: not yet run in Home Assistant.** The gesture engine has 137 passing
+> tests, and every Home Assistant API used is statically resolved against a core
+> checkout, but no part of this has been loaded into a live instance. Treat the
+> first install as the real test. See [Status](#status-and-limits).
 
-Two layers, joined by a canonical vocabulary on the event bus:
+## How it works
+
+Two layers. The integration normalises hardware into standard entities; a
+blueprint maps those to actions.
 
 ```
-   ZHA / Zigbee2MQTT / deCONZ / Thread / Matter / ESPHome / a wall switch
+  ZHA / Zigbee2MQTT / deCONZ / Thread / Matter / ESPHome / a wall switch
                               │
-                    ┌─────────▼──────────┐
-                    │  Adapter blueprint │   one per physical remote
-                    │  "the driver"      │   maps hardware → canonical
-                    └─────────┬──────────┘
-                              │  event: virtual_remote
-                              │  { remote: living_room, gesture: b2_long }
-                    ┌─────────▼──────────┐
-                    │ Dispatcher         │   one per remote
-                    │ blueprint          │   canonical → your actions
-                    └────────────────────┘
+                    ┌─────────▼─────────────┐
+                    │ virtual_remote        │  learns each button by having
+                    │ (custom integration)  │  you press it; synthesises
+                    └─────────┬─────────────┘  gestures the hardware lacks
+                              │
+                    event.living_room_button_1   ← one entity per button,
+                      device_class: button          device_class: button
+                      event_type: multi_press_end
+                      multi_press_count: 2
+                              │
+                    ┌─────────▼─────────────┐
+                    │ Button actions        │  one automation per button
+                    │ (blueprint)           │
+                    └───────────────────────┘
 ```
 
-The adapter is the only place that touches hardware. The dispatcher only ever
-sees `b2_long`, so it works identically on a ZHA TRADFRI and a Zigbee2MQTT
-STYRBAR — and on hardware that does not exist yet.
+The integration is the only thing that touches hardware. Everything downstream
+sees a standard button entity, so a virtual remote is indistinguishable from a
+natively-supported one.
 
-### Canonical vocabulary
+### The event vocabulary
 
-| | |
+Home Assistant standardised button events in core PR
+[#177028](https://github.com/home-assistant/core/pull/177028) (2026-07-22,
+shipping in **2026.8**):
+
+| Event type | Meaning |
 |---|---|
-| Buttons | `b1` `b2` `b3` `b4` `b5` `b6` `b7` `b8`, plus `dial` |
-| Gestures | `short` `double` `triple` `long` `release` `cw` `ccw` |
-| Composed | `b1_short` · `b3_long` · `b3_release` · `dial_cw` |
+| `press_start` | the button went down |
+| `press_end` | released after a brief press — the standard click |
+| `long_press_start` | held past the threshold |
+| `long_press_end` | released after a long hold |
+| `multi_press_ongoing` | an intermediate press in a sequence |
+| `multi_press_end` | a sequence completed |
 
-`long` fires when a hold *begins*; `release` when it ends. A remote that cannot
-report a release just has no `*_release` triggers — hold-to-repeat then stops at
-its step cap instead.
-
-Slots are deliberately generic. `b1`…`b5` stays true across every device you
-will ever map; `up`/`down` stops being true the moment you map a cube or a
-two-button remote.
+Multi-press is **one event type carrying a `multi_press_count` attribute**, not
+separate double/triple types — so quadruple press comes free. This integration
+appears to be the first implementer of these types.
 
 ## Install
 
-Copy into your HA config, or add via **Settings → Automations & Scenes →
-Blueprints → Import Blueprint**:
+**Integration** — copy `custom_components/virtual_remote/` into your Home
+Assistant `config/custom_components/`, then restart. Add it via
+**Settings → Devices & services → Add integration → Virtual Remote**.
 
-```
-config/blueprints/automation/dktpham/virtual_remote_adapter.yaml
-config/blueprints/automation/dktpham/virtual_remote_4button.yaml
-config/blueprints/automation/dktpham/virtual_remote_5button.yaml
-```
-
-The adapter is always required. Add whichever dispatcher matches the remote's
-button count.
-
-Then **Developer Tools → YAML → Reload Blueprints** (or restart).
+**Blueprint** — copy
+`blueprints/automation/dktpham/virtual_remote_actions.yaml` into
+`config/blueprints/automation/dktpham/`, then **Developer tools → YAML →
+Reload blueprints**.
 
 ## Setup
 
-### Step 1 — the adapter
+### 1. Add a remote
 
-Create an automation from **Virtual Remote · Adapter**.
+**Add virtual remote** on the integration's entry, then:
 
-1. **Virtual remote ID** — a slug, e.g. `living_room_5button`.
-2. **Hardware button events** — add one trigger per gesture. Use whatever your
-   integration offers: a device trigger, a raw `zha_event`, an MQTT topic, a
-   state change. Mix freely.
-3. **For every trigger, set its Trigger ID** to a canonical gesture name.
+1. Name it and say how many buttons it has.
+2. For each button, a dialog says *"Press and release Button 1 now"* and
+   captures whatever hits the event bus. It shows what it caught and what it
+   inferred, and you accept, retry, or type it in by hand.
+3. Optionally *"also learn hold"* — for remotes that report holds themselves
+   (an IKEA dim button sends different events for a tap and a hold), this adds
+   the hold as a pass-through gesture.
+4. Finally, choose whether to detect multi-presses.
 
-> ### ⚠ The one rule
-> Every trigger needs a **Trigger ID** and it must be a canonical gesture name
-> (`b1_short`, `b2_release`, …). In the trigger's **⋮ menu → Edit ID**.
->
-> If you skip it, HA silently falls back to the trigger's *position* — `"0"`,
-> `"1"`, `"2"` — and the dispatcher will never match. This is the single most
-> likely reason a setup does not work.
+You end up with one device and one `event` entity per button. Nothing to type
+but the name — no canonical gesture vocabulary, no trigger IDs, no YAML.
 
-The Trigger ID *is* the mapping. That is the whole trick: all hardware
-weirdness stays inside the trigger, and the ID is the contract.
+**What "shape" means.** The flow infers it, but it drives everything downstream:
 
-### Step 2 — the dispatcher
+| Captured | Shape | Consequence |
+|---|---|---|
+| two events per press | `edge` | duration is measurable → long press can be synthesised |
+| one event per press | `single_shot` | no duration → no `press_start`, no synthesised holds |
+| a hold you taught it | `decoded` | passed through as-is; the hardware already decided |
 
-Create an automation from **Virtual Remote · 5-button dispatcher**, give it the
-**same** remote ID, and fill in the actions you want per button and gesture.
+### 2. Map it to actions
 
-Enable **Repeat while held** under *Hold behaviour* if you want hold-to-dim or
-hold-to-run-a-cover. The release event cancels the loop (the blueprint runs in
-`mode: restart`, which is what makes that work).
+Create an automation from **Virtual Remote · Button actions**, pick the button
+entity, and fill in the gestures you want. One automation per button.
 
-## Finding your hardware events
+## The multi-press latency trade
 
-**Preferred — device triggers.** In the trigger editor pick *Device*, choose the
-remote, and use the dropdown. Names like "Remote button short press · turn on"
-are already integration-agnostic and need no cluster knowledge. Not every
-integration exposes a *release*, though.
+Synthesising a double press has an unavoidable cost: a single press cannot be
+reported as final until the window closes, because it might turn out to be the
+first of two.
 
-**Fallback — watch the bus.** Developer Tools → **Events** → listen to
-`zha_event` (or `deconz_event`, or `mqtt` for Zigbee2MQTT), press buttons, and
-read what arrives. Then use an *Event* trigger matching what you saw.
+The mitigation is **terminate-on-max** — once the configured maximum number of
+presses has landed the sequence is provably complete, so the *highest* gesture
+you configure is always instant and only shorter ones wait:
 
-### IKEA TRADFRI 5-button (E1524/E1810) under ZHA
-
-These signatures are taken from your own working blueprint, so the marked rows
-are known-good on this hardware. Suggested slots: `b1` centre/power, `b2` up,
-`b3` down, `b4` left, `b5` right.
-
-| Trigger ID | `zha_event` command | args | verified |
+| Gesture | detect up to 1 | up to 2 | up to 3 |
 |---|---|---|---|
-| `b1_short`   | `toggle` | | ✅ |
-| `b1_long`    | `move_to_level_with_on_off` | | ✅ |
-| `b2_short`   | `step_with_on_off` | | ✅ |
-| `b2_long`    | `move_with_on_off` | | ✅ |
-| `b3_short`   | `step` | | ✅ |
-| `b3_long`    | `move` | | ✅ |
-| `b4_short`   | `press` | `[257, 13, 0]` | ✅ |
-| `b4_long`    | `hold`  | `[3329, 0]` | ✅ |
-| `b5_short`   | `press` | `[256, 13, 0]` | ✅ |
-| `b5_long`    | `hold`  | `[3328, 0]` | ✅ |
-| `b2_release` | `stop_with_on_off` | | ⚠ inferred |
-| `b3_release` | `stop` | | ⚠ inferred |
+| single press | **instant** | +400 ms | +400 ms |
+| double press | — | **instant** | +400 ms |
+| hold, release, pre-decoded | **instant** | **instant** | **instant** |
 
-The two release rows follow the Zigbee LevelControl pairing
-(`move_with_on_off`→`stop_with_on_off`, `move`→`stop`) rather than direct
-observation — confirm with the event listener. Left/right release (`b4_release`,
-`b5_release`) is not in your current config at all; watch the bus for a
-`release` command if you want it.
+Multi-press defaults to **off** for that reason: one press to toggle a light is
+the common case, and 400 ms of added latency there is a bad default. When you do
+enable it, "up to double" keeps the double instant.
 
-An event trigger for a raw signature looks like:
+With multi-press on, each non-final press still emits `multi_press_ongoing`
+immediately, so a single-shot button gives feedback without waiting.
 
-```yaml
-trigger: event
-event_type: zha_event
-event_data:
-  device_id: <your remote's device id>
-  command: press
-  args: [256, 13, 0]
-id: b5_short          # ← the canonical gesture
+## Status and limits
+
+**Never run in Home Assistant.** What *is* verified:
+
+- The gesture engine, thoroughly — 137 tests, no Home Assistant needed.
+  `tools/check_integration.py` enforces that `gestures.py`, `model.py` and
+  `const.py` import nothing from `homeassistant`, which is what makes that
+  possible.
+- Every core import statically resolved against a checkout, with anything
+  unresolvable reported rather than passed silently.
+
+What is **not** verified: that it loads, that the config flow renders, that the
+learning step captures anything. Those need a live instance.
+
+Known limits:
+
+- **Buttons cannot be added or removed after creation.** Reconfigure is not
+  implemented in v1; delete the remote and re-add it. (Deliberate: removing a
+  button needs orphaned-entity cleanup, and half-doing that leaves stale
+  entities behind.)
+- **One source per button per learning pass**, plus an optional hold. A button
+  whose short press and hold arrive as unrelated events is handled; a button fed
+  from two different physical devices is not, in the flow — the data model and
+  engine support it, the UI does not yet.
+- **`double`/`triple` need either hardware support or synthesis enabled.**
+- **No dials.** Rotation is not expressible on a `device_class: button` entity;
+  it needs its own entity type.
+- **On Home Assistant 2026.7** the event types work but display untranslated,
+  since the translations ship with 2026.8. Self-healing on upgrade.
+- **Timing defaults** (400 ms window, 500 ms long-press threshold, 50 ms tap
+  coalescing) come from desktop and Android human-factors defaults, *not* from
+  measurements of Zigbee remotes.
+
+### An upstream gap
+
+`event.received` can only filter on `event_type`, not on attributes, so "on
+double press" needs a template condition on `multi_press_count`. The blueprint
+hides it, but the real fix is an optional `multi_press_count` filter in
+`EVENT_RECEIVED_TRIGGER_SCHEMA` upstream. Inventing `double_press` event types
+instead would forfeit exactly the standardisation this integration exists to
+provide.
+
+## Development
+
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install pytest pyyaml
+
+.venv/Scripts/python -m pytest tests/ -q          # engine + strings coverage
+.venv/Scripts/python tools/check_integration.py   # purity + import resolution
+.venv/Scripts/python tools/check_blueprints.py blueprints
 ```
 
-### STYRBAR (E2001/E2002)
+`check_integration.py` takes an optional path to a Home Assistant checkout (or
+reads `$HA_CORE`). Without one it still enforces engine purity.
 
-Four buttons. Use the **4-button dispatcher** and map `b1` up/on, `b2` down/off,
-`b3` left, `b4` right. Its ZHA device triggers cover short and long press; verify
-release with the event listener.
+Architecture, in dependency order:
 
-If you own both a STYRBAR and a 5-button TRADFRI and want the same physical
-position to mean the same slot on both, use the **5-button** dispatcher for the
-STYRBAR instead and leave `b1` (centre) unused — up/down/left/right then line up
-as `b2`…`b5` on each remote. Pick one convention per household and stick to it;
-the slot numbers live in the adapter's Trigger IDs, so changing your mind later
-means editing the adapter, not just swapping dispatchers.
+| File | Role |
+|---|---|
+| `gestures.py` | the state machine. **Zero `homeassistant` imports** — holds no clock and arms no timers, so it is a pure function of `(state, signal, now)` |
+| `model.py` | typed config, and the engine → Home Assistant event-type mapping |
+| `source.py` | attaches user triggers, normalises them to engine signals |
+| `event.py` | the entity: owns the single timer and calls `_trigger_event` |
+| `config_flow.py` | setup, including the learn-by-pressing step |
 
-## Testing
+The engine boundary is load-bearing, not stylistic: it is what lets the timing
+logic be tested exhaustively in 0.1 s, and it means the engine could move to a
+standalone package unchanged.
 
-1. Set up the adapter, then watch Developer Tools → **Events** → listen to
-   `virtual_remote` and press buttons. You should see
-   `{ remote: …, gesture: b2_short, value: "" }`.
-2. If gestures come through as `"0"`, `"1"`, … you forgot the Trigger IDs.
-3. If nothing arrives, the hardware trigger itself is wrong — check the
-   adapter automation's trace.
-4. Only once step 1 looks right, wire up the dispatcher.
+## Legacy blueprints
 
-Debugging is genuinely nicer than a monolithic blueprint here: the bus event is
-an inspectable seam, so you always know which layer is at fault.
+`blueprints/automation/dktpham/virtual_remote_{adapter,4button,5button,*_adapter}.yaml`
+are the **superseded** pure-blueprint implementation: an adapter automation
+normalised hardware into `virtual_remote` bus events, and a topology dispatcher
+mapped those to actions. It works — one setup was tested on a ZHA IKEA TRADFRI —
+but it needed two automations per remote, a matching slug between them, and it
+could not synthesise gestures at all, because blueprints are stateless and their
+forms are static.
 
-## Limits, honestly
-
-- **Two automations per remote**, and you type Trigger IDs by hand. That is the
-  cost of not having per-model tables. The planned custom integration removes it.
-- **No virtual-remote entity.** The canonical events are bus events, not an
-  entity, so there is nothing to see in the UI. (A template *event entity* would
-  fix this, but trigger-based template entities are YAML-only — no UI path at
-  all — which is worse fiddling for less gain.)
-- **`double`/`triple` need hardware support.** The blueprint does not synthesise
-  them from timing; if your remote does not report a double press, that slot
-  stays unused.
-- **Dial magnitude** rides along in `value` via the adapter's value-passthrough
-  template, available to your actions as the `value` variable. It has to be
-  written defensively — it runs on *every* gesture.
-
-## Roadmap
-
-- Dispatchers for 1/2-button and dial topologies
-- Port the target-stepping "room control" pattern (step through lights/covers,
-  presets, confirmation blip) as a second dispatcher
-- **Custom integration**: a config flow that says "press button 1 now", captures
-  whatever hits the bus, and writes the mapping for you — no Trigger IDs, no
-  adapter automation, and a real device with an event entity
+Kept for reference and for anyone who cannot install a custom component. The
+integration replaces both halves.

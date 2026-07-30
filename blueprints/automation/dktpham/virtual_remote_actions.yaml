@@ -1,0 +1,220 @@
+# Virtual Remote · Button actions
+#
+# Maps one button of a virtual remote to actions. Pair with the Virtual Remote
+# custom integration, which creates one `event` entity per button.
+#
+# WHY THIS BLUEPRINT EXISTS
+# The integration emits Home Assistant's standard button event types, where a
+# multi-press is one event type (`multi_press_end`) carrying a `multi_press_count`
+# attribute rather than separate double/triple types. That is the right data
+# model - it scales to quadruple press for free - but the `event.received`
+# trigger can only filter on `event_type`, not on attributes. So "on double
+# press" needs a template condition on the count, and this blueprint's whole job
+# is to hide that:
+#
+#   triggers:
+#     - trigger: event.received
+#       options: { event_type: [multi_press_end] }
+#   conditions:
+#     - "{{ trigger.to_state.attributes.multi_press_count == 2 }}"
+#
+# One button per automation. That is deliberate: buttons are separate entities,
+# so this stays a thin, obvious mapping instead of a form with forty slots.
+#
+# Slots you leave empty are simply never triggered. Which gestures a button can
+# actually produce depends on how it was learned - check the entity's
+# `event_types` attribute if a slot never fires.
+
+blueprint:
+  name: Virtual Remote · Button actions
+  description: >-
+    Maps the gestures of one virtual remote button to actions - single press,
+    double, triple, and hold with optional repeat-while-held. Requires the
+    Virtual Remote integration, which turns any physical remote into standard
+    button event entities.
+  domain: automation
+  author: dktpham
+  homeassistant:
+    # The `event.received` trigger below is a new-style trigger that nests its
+    # filter under `options:`; this is deliberately conservative rather than
+    # guessing the exact release it appeared in.
+    min_version: "2026.7.0"
+  input:
+    button:
+      name: Button
+      description: >-
+        The virtual remote button to react to. Each button of a remote is its
+        own entity.
+      selector:
+        entity:
+          filter:
+            - integration: virtual_remote
+              domain: event
+
+    presses:
+      name: Presses
+      icon: mdi:gesture-tap
+      collapsed: false
+      input:
+        single_press:
+          name: Single press
+          description: >-
+            Fires on `press_end`. If multi-press detection is enabled for this
+            button, this is delayed until the multi-press window closes.
+          default: []
+          selector:
+            action:
+        double_press:
+          name: Double press
+          default: []
+          selector:
+            action:
+        triple_press:
+          name: Triple press
+          default: []
+          selector:
+            action:
+        quadruple_press:
+          name: Quadruple press
+          default: []
+          selector:
+            action:
+
+    holds:
+      name: Hold
+      icon: mdi:gesture-tap-hold
+      collapsed: false
+      input:
+        hold:
+          name: Hold begins
+          description: Fires on `long_press_start`.
+          default: []
+          selector:
+            action:
+        hold_release:
+          name: Hold ends
+          description: >-
+            Fires on `long_press_end`. Also stops a repeating hold.
+          default: []
+          selector:
+            action:
+        hold_repeat:
+          name: Repeat while held
+          description: >-
+            Run the "hold begins" actions over and over until released, instead
+            of once. This is what makes hold-to-dim feel right.
+          default: false
+          selector:
+            boolean:
+        hold_interval:
+          name: Repeat interval
+          default: 400
+          selector:
+            number:
+              min: 100
+              max: 3000
+              step: 50
+              unit_of_measurement: ms
+        hold_max_steps:
+          name: Maximum repeats
+          description: >-
+            Safety cap. The loop normally ends on release; this only matters if
+            that event never arrives.
+          default: 30
+          selector:
+            number:
+              min: 1
+              max: 200
+
+# restart so the release event cancels a repeating hold, and so a new press
+# supersedes whatever was running.
+mode: restart
+
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: !input button
+    options:
+      event_type:
+        - press_end
+    id: single
+  - trigger: event.received
+    target:
+      entity_id: !input button
+    options:
+      event_type:
+        - multi_press_end
+    id: multi
+  - trigger: event.received
+    target:
+      entity_id: !input button
+    options:
+      event_type:
+        - long_press_start
+    id: hold_start
+  - trigger: event.received
+    target:
+      entity_id: !input button
+    options:
+      event_type:
+        - long_press_end
+    id: hold_end
+
+variables:
+  hold_repeat: !input hold_repeat
+  hold_interval: !input hold_interval
+  hold_max_steps: !input hold_max_steps
+  # Only present on multi_press_* events; 0 elsewhere.
+  press_count: "{{ trigger.to_state.attributes.multi_press_count | int(0) }}"
+
+actions:
+  - choose:
+      - alias: Single press
+        conditions:
+          - condition: trigger
+            id: single
+        sequence: !input single_press
+
+      - alias: Double press
+        conditions:
+          - condition: trigger
+            id: multi
+          - "{{ press_count == 2 }}"
+        sequence: !input double_press
+
+      - alias: Triple press
+        conditions:
+          - condition: trigger
+            id: multi
+          - "{{ press_count == 3 }}"
+        sequence: !input triple_press
+
+      - alias: Quadruple press
+        conditions:
+          - condition: trigger
+            id: multi
+          - "{{ press_count >= 4 }}"
+        sequence: !input quadruple_press
+
+      - alias: Hold begins
+        conditions:
+          - condition: trigger
+            id: hold_start
+        sequence:
+          - choose:
+              - conditions: "{{ hold_repeat }}"
+                sequence:
+                  - repeat:
+                      count: "{{ hold_max_steps | int }}"
+                      sequence:
+                        - sequence: !input hold
+                        - delay:
+                            milliseconds: "{{ hold_interval | int }}"
+            default:
+              - sequence: !input hold
+
+      - alias: Hold ends
+        conditions:
+          - condition: trigger
+            id: hold_end
+        sequence: !input hold_release

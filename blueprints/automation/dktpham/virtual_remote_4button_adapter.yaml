@@ -1,0 +1,278 @@
+# Virtual Remote · 4-button adapter
+#
+# Layer 1 of two, for a 4-button remote. This is the driver: it turns whatever
+# your hardware emits into canonical `virtual_remote` events, and nothing
+# downstream ever learns which integration the remote came from.
+#
+# There are NO canonical names to type here. Drop each hardware trigger into the
+# labelled box that matches what it does, and the gesture is implied by the box.
+# Leave a box empty if the remote has no such gesture.
+#
+# Suggested layout for an IKEA STYRBAR (E2001/E2002):
+#   b1  up / on      b2  down / off      b3  left      b4  right
+#
+# HOW THE BOX IS IDENTIFIED
+# Home Assistant flattens the trigger lists below into one list, in the order
+# they are declared, and gives each trigger an index (`trigger.idx`) which is
+# its position in that flattened list. Counting how many triggers each box
+# contributed turns that index back into "which box did this come from". Empty
+# boxes contribute nothing, and a box holding several triggers is handled
+# correctly - so a gesture that your remote reports two different ways can have
+# both triggers in the same box.
+#
+# Because of this, the order of `gesture_names`, `gesture_triggers` and the
+# `triggers:` block below MUST stay in lockstep. They are verified against each
+# other by tools/check_blueprints.py.
+
+blueprint:
+  name: Virtual Remote · 4-button adapter
+  description: >-
+    Normalises a 4-button remote into canonical `virtual_remote` events, so the
+    dispatcher blueprint never needs to know about ZHA, Zigbee2MQTT, deCONZ or
+    anything else. Drop each hardware trigger into the labelled box that matches
+    what it does - there are no gesture names to type. One adapter automation per
+    physical remote, paired with a 4-button dispatcher using the same remote ID.
+  domain: automation
+  author: dktpham
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    remote_id:
+      name: Virtual remote ID
+      description: >-
+        A short unique slug identifying this remote, e.g. `bedroom_styrbar`.
+        The dispatcher blueprint must be given exactly the same ID. This one is
+        global - it is what tells your remotes apart on the event bus - so it
+        must be unique across your whole install.
+      selector:
+        text:
+
+    b1:
+      name: Button 1 · up / on
+      icon: mdi:arrow-up
+      description: >-
+        Triggers for this button. Use whatever your integration offers - a device
+        trigger, a raw `zha_event`, an MQTT topic, a state change. Leave a box
+        empty if this button has no such gesture.
+      collapsed: true
+      input:
+        b1_short:
+          name: Single press
+          default: []
+          selector:
+            trigger:
+        b1_double:
+          name: Double press
+          default: []
+          selector:
+            trigger:
+        b1_long:
+          name: Hold
+          description: Fires when the hold begins.
+          default: []
+          selector:
+            trigger:
+        b1_release:
+          name: Release
+          description: Fires when the hold ends. Leave empty if unsupported.
+          default: []
+          selector:
+            trigger:
+
+    b2:
+      name: Button 2 · down / off
+      icon: mdi:arrow-down
+      collapsed: true
+      input:
+        b2_short:
+          name: Single press
+          default: []
+          selector:
+            trigger:
+        b2_double:
+          name: Double press
+          default: []
+          selector:
+            trigger:
+        b2_long:
+          name: Hold
+          default: []
+          selector:
+            trigger:
+        b2_release:
+          name: Release
+          default: []
+          selector:
+            trigger:
+
+    b3:
+      name: Button 3 · left
+      icon: mdi:arrow-left
+      collapsed: true
+      input:
+        b3_short:
+          name: Single press
+          default: []
+          selector:
+            trigger:
+        b3_double:
+          name: Double press
+          default: []
+          selector:
+            trigger:
+        b3_long:
+          name: Hold
+          default: []
+          selector:
+            trigger:
+        b3_release:
+          name: Release
+          default: []
+          selector:
+            trigger:
+
+    b4:
+      name: Button 4 · right
+      icon: mdi:arrow-right
+      collapsed: true
+      input:
+        b4_short:
+          name: Single press
+          default: []
+          selector:
+            trigger:
+        b4_double:
+          name: Double press
+          default: []
+          selector:
+            trigger:
+        b4_long:
+          name: Hold
+          default: []
+          selector:
+            trigger:
+        b4_release:
+          name: Release
+          default: []
+          selector:
+            trigger:
+
+    advanced:
+      name: Advanced
+      icon: mdi:cog
+      collapsed: true
+      input:
+        value_template:
+          name: Value passthrough
+          description: >-
+            Attaches a `value` to every emitted event - intended for dials, where
+            rotation magnitude or step size matters. Leave empty unless you need
+            it. This template runs on EVERY gesture, so it must never raise:
+            guard it with `default`, e.g.
+            `{{ trigger.event.data.args[0] | default(0) }}`.
+          default: ""
+          selector:
+            text:
+
+# parallel so a burst of presses is never dropped; the dispatcher decides what
+# to do about overlap, not the adapter.
+mode: parallel
+max: 25
+max_exceeded: silent
+
+# Order here defines the index space that `gesture` resolves against, and must
+# match gesture_names / gesture_triggers exactly.
+triggers:
+  - triggers: !input b1_short
+  - triggers: !input b1_double
+  - triggers: !input b1_long
+  - triggers: !input b1_release
+  - triggers: !input b2_short
+  - triggers: !input b2_double
+  - triggers: !input b2_long
+  - triggers: !input b2_release
+  - triggers: !input b3_short
+  - triggers: !input b3_double
+  - triggers: !input b3_long
+  - triggers: !input b3_release
+  - triggers: !input b4_short
+  - triggers: !input b4_double
+  - triggers: !input b4_long
+  - triggers: !input b4_release
+
+variables:
+  remote_id: !input remote_id
+
+  gesture_names:
+    - b1_short
+    - b1_double
+    - b1_long
+    - b1_release
+    - b2_short
+    - b2_double
+    - b2_long
+    - b2_release
+    - b3_short
+    - b3_double
+    - b3_long
+    - b3_release
+    - b4_short
+    - b4_double
+    - b4_long
+    - b4_release
+
+  gesture_triggers:
+    - !input b1_short
+    - !input b1_double
+    - !input b1_long
+    - !input b1_release
+    - !input b2_short
+    - !input b2_double
+    - !input b2_long
+    - !input b2_release
+    - !input b3_short
+    - !input b3_double
+    - !input b3_long
+    - !input b3_release
+    - !input b4_short
+    - !input b4_double
+    - !input b4_long
+    - !input b4_release
+
+  # Walk the boxes in declaration order, accumulating how many triggers each
+  # contributed, and stop at the box whose index range contains trigger.idx.
+  gesture: >-
+    {%- set i = trigger.idx | int(-1) -%}
+    {%- set ns = namespace(acc=0, found='') -%}
+    {%- for name in gesture_names -%}
+      {%- set c = (gesture_triggers[loop.index0] | default([], true)) | count -%}
+      {%- if ns.found == '' and i >= ns.acc and i < ns.acc + c -%}
+        {%- set ns.found = name -%}
+      {%- endif -%}
+      {%- set ns.acc = ns.acc + c -%}
+    {%- endfor -%}
+    {{ ns.found }}
+
+actions:
+  - choose:
+      # Should be unreachable: every firing trigger came from one of the boxes.
+      # If it happens, say so rather than emitting a malformed event.
+      - alias: Guard · could not resolve which box the trigger came from
+        conditions: "{{ gesture == '' }}"
+        sequence:
+          - action: system_log.write
+            data:
+              level: warning
+              logger: virtual_remote
+              message: >-
+                Adapter '{{ remote_id }}': a trigger fired at index
+                {{ trigger.idx }} that could not be matched to any gesture box,
+                so it was ignored. This should not happen - please report it.
+
+    default:
+      - alias: Emit the canonical event
+        event: virtual_remote
+        event_data:
+          remote: !input remote_id
+          gesture: "{{ gesture }}"
+          value: !input value_template

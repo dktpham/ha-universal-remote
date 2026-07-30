@@ -9,10 +9,9 @@
 # in this file, which is why it works with ZHA, Zigbee2MQTT, deCONZ, Matter,
 # Thread, an ESPHome button, or an integration that does not exist yet.
 #
-# THE ONE RULE: every trigger MUST have a Trigger ID set, and that ID must be a
-# canonical gesture name. In the automation editor, use the three-dot menu on a
-# trigger -> "Edit ID". If you forget, Home Assistant falls back to the
-# trigger's position ("0", "1", ...) and the dispatcher will not match it.
+# THE ONE RULE: every trigger must carry a canonical gesture name, either as its
+# Trigger ID or as its name - see "Gesture name source" below. Unlabelled
+# triggers are logged as a warning instead of silently doing nothing.
 #
 # Canonical vocabulary
 #   buttons   b1 b2 b3 b4 b5 b6 b7 b8   (and dial)
@@ -28,7 +27,7 @@ blueprint:
   description: >-
     Normalises any button device into canonical `virtual_remote` events, so the
     dispatcher blueprints never need to know about ZHA, Zigbee2MQTT, deCONZ or
-    anything else. Add one trigger per gesture and set each trigger's ID to a
+    anything else. Add one trigger per gesture and label each one with a
     canonical name such as `b1_short`, `b2_long`, `b2_release` or `dial_cw`.
     One adapter automation per physical remote.
   domain: automation
@@ -38,8 +37,9 @@ blueprint:
       name: Virtual remote ID
       description: >-
         A short unique slug identifying this remote, e.g. `living_room_5button`.
-        The dispatcher blueprint must be given exactly the same ID. Lower case,
-        no spaces.
+        The dispatcher blueprint must be given exactly the same ID. Unlike
+        trigger names, this one is global - it is what tells your remotes apart
+        on the event bus, so it must be unique across your whole install.
       selector:
         text:
 
@@ -48,11 +48,38 @@ blueprint:
       description: >-
         One trigger per button gesture. Use whatever your integration offers -
         a device trigger, a raw `zha_event`, an MQTT topic, a state change.
-        REQUIRED: set each trigger's ID (three-dot menu → Edit ID) to a
-        canonical gesture name such as `b1_short` or `b2_release`. The ID is the
-        mapping; the trigger itself can be as hardware-specific as you like.
+        Mix freely. Each trigger must be labelled with a canonical gesture name;
+        see below for which label is read.
       selector:
         trigger:
+
+    gesture_source:
+      name: Gesture name source
+      description: >-
+        Where to read each trigger's canonical gesture name from.
+
+
+        **Trigger ID** is the tidier option, but the blueprint form does not
+        offer "Edit ID" for every trigger type. When it is missing, either switch
+        that one trigger card to YAML mode (⋮ → Edit in YAML) and add
+        `id: b1_short`, or use the option below instead.
+
+
+        **Trigger name** reads the trigger's name (⋮ → Rename), which is
+        available on every trigger type. Only pick this if you are naming your
+        triggers `b1_short` rather than "Button 1 short press".
+
+
+        Names are tidied up before use: trimmed, lower-cased, and spaces turned
+        into underscores, so "B1 Short" also works.
+      default: id
+      selector:
+        select:
+          options:
+            - label: "Trigger ID (⋮ → Edit ID, or YAML mode)"
+              value: id
+            - label: "Trigger name (⋮ → Rename)"
+              value: alias
 
     value_template:
       name: Value passthrough (advanced, optional)
@@ -77,11 +104,42 @@ max_exceeded: silent
 # wrapper dict that contains the `triggers` key and nothing else.
 triggers: !input hardware_triggers
 
+variables:
+  remote_id: !input remote_id
+  gesture_source: !input gesture_source
+  # The whole mapping, in one expression: the trigger's own label *is* the
+  # gesture. `trigger.alias` is None when unset; `trigger.id` instead falls back
+  # to the trigger's position ("0", "1", ...), which the guard below catches.
+  gesture: >-
+    {%- set raw = trigger.alias if gesture_source == 'alias' else trigger.id -%}
+    {{ (raw | default('', true)) | string | trim | lower | replace(' ', '_') }}
+
 actions:
-  - alias: Emit the canonical event
-    event: virtual_remote
-    event_data:
-      remote: !input remote_id
-      # The whole mapping, in one line: the trigger's ID *is* the gesture.
-      gesture: "{{ trigger.id }}"
-      value: !input value_template
+  - choose:
+      # An unlabelled trigger would otherwise emit a gesture of "0" or "1" and
+      # silently match nothing in the dispatcher. Say so loudly instead - this
+      # is by far the most common setup mistake.
+      - alias: Guard · trigger has no canonical gesture name
+        conditions: "{{ gesture == '' or gesture | regex_match('^[0-9]+$') }}"
+        sequence:
+          - action: system_log.write
+            data:
+              level: warning
+              logger: virtual_remote
+              message: >-
+                Adapter '{{ remote_id }}': a trigger fired without a canonical
+                gesture name, so it was ignored (resolved to '{{ gesture }}').
+                {% if gesture_source == 'id' -%}
+                Set that trigger's ID to a gesture name such as 'b1_short' -
+                ⋮ → Edit ID, or ⋮ → Edit in YAML and add `id: b1_short`.
+                {%- else -%}
+                Rename that trigger to a gesture name such as 'b1_short'.
+                {%- endif %}
+
+    default:
+      - alias: Emit the canonical event
+        event: virtual_remote
+        event_data:
+          remote: !input remote_id
+          gesture: "{{ gesture }}"
+          value: !input value_template

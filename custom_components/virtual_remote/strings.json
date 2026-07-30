@@ -1,0 +1,65 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Virtual Remote is already set up. Add your remotes from its entry on the Devices & services page."
+    }
+  },
+  "config_subentries": {
+    "remote": {
+      "entry_type": "Virtual remote",
+      "initiate_flow": {
+        "user": "Add virtual remote",
+        "reconfigure": "Reconfigure virtual remote"
+      },
+      "step": {
+        "user": {
+          "title": "Add a virtual remote",
+          "description": "Name the remote and say how many buttons it has. You will then be asked to press each button in turn, and whatever your remote emits is captured for you - it does not matter whether it arrived via ZHA, Zigbee2MQTT, Thread or anything else.",
+          "data": {
+            "name": "Name",
+            "button_count": "Number of buttons"
+          }
+        },
+        "confirm": {
+          "title": "{button}",
+          "description": "Captured:\n\n{captured}\n\nThat looks like {shape}.",
+          "data": {
+            "next": "What next?"
+          }
+        },
+        "learn_failed": {
+          "title": "Nothing detected for {button}",
+          "description": "No event arrived. Either the press was not registered, or this remote reports through something that does not put events on the event bus. You can enter the event by hand instead, or skip this button.",
+          "data": {
+            "next": "What next?"
+          }
+        },
+        "manual": {
+          "title": "Enter {button} by hand",
+          "description": "The event type your remote fires, plus optionally the event data that identifies this particular button, as JSON. For example event type `zha_event` with data `{\"command\": \"toggle\"}`.\n\nTo find these, open Developer tools → Events, listen to `zha_event` (or your integration's equivalent), and press the button.",
+          "data": {
+            "event_type": "Event type",
+            "event_data": "Event data (JSON, optional)"
+          }
+        },
+        "timing": {
+          "title": "Multi-press for {remote}",
+          "description": "Synthesising a double press has a cost: a single press cannot be reported as final until the window closes, which adds roughly 400 ms to it. Whichever option you pick stays instant - only shorter presses wait. Leave it off unless you want double presses.",
+          "data": {
+            "multi_press_max": "Detect up to"
+          }
+        }
+      },
+      "progress": {
+        "learn_press": "Press and release {button} on {remote} now.",
+        "learn_hold": "Now hold {button} down for about two seconds, then release it."
+      },
+      "error": {
+        "invalid_json": "That is not valid JSON. It should look like {\"command\": \"toggle\"}."
+      },
+      "abort": {
+        "no_buttons": "No buttons were configured, so there is nothing to create."
+      }
+    }
+  }
+}
